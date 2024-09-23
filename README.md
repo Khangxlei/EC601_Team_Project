@@ -34,7 +34,7 @@ The MVP will include:
 
 - **Recurrent Neural Networks (RNN)**
 - **Sentiment Analysis** from news headlines and Google Trends data
-- **Data Sources**: NASDAQ, NYSE, Nikkei, FTSE
+- **Data Sources**: S&P 500, NASDAQ, NYSE, Nikkei, FTSE
 
 ---
 
