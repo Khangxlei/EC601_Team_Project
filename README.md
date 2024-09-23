@@ -36,11 +36,5 @@ The MVP will include:
 - **Sentiment Analysis** from news headlines and Google Trends data
 - **Data Sources**: NASDAQ, NYSE, Nikkei, FTSE
 
-## How to Run
-
-1. Input a date range for stock price predictions.
-2. Select stock market data sources (e.g., NASDAQ, NYSE).
-3. The model will output predicted stock price trends and comparisons across different sources.
-4. Use the predictions to make informed investment decisions or evaluate the model’s performance for research purposes.
-
 ---
+
