@@ -38,3 +38,14 @@ The MVP will include:
 
 ---
 
+## Citations
+
+Bhandari, Hum Nath, et al. “Predicting stock market index using LSTM.” *Machine Learning with Applications*, vol. 9, Sept. 2022, p. 100320, [https://doi.org/10.1016/j.mlwa.2022.100320](https://doi.org/10.1016/j.mlwa.2022.100320).
+
+Lu, Minrong, and Xuerong Xu. "Trnn: An Efficient Stock Price Prediction Neural Network Model Based on Recurrent Neural Network and Price-Volume Time Series," 2023, [https://doi.org/10.2139/ssrn.4481659](https://doi.org/10.2139/ssrn.4481659).
+
+Ko, Ching-Ru, and Hsien-Tsung Chang. “LSTM-based sentiment analysis for stock price forecast.” *PeerJ Computer Science*, vol. 7, 11 Mar. 2021, [https://doi.org/10.7717/peerj-cs.408](https://doi.org/10.7717/peerj-cs.408).
+
+Sunny, Md Arif Istiake, Mirza Mohd Shahriar Maswood, and Abdullah G. Alharbi. "Deep learning-based stock price prediction using LSTM and bi-directional LSTM model." 2020 2nd novel intelligent and leading emerging sciences conference (NILES). IEEE, 2020.
+
+Subasi, Abdulhamit, et al. "Stock market prediction using machine learning." *Procedia Computer Science*, vol. 194, 2021, pp. 173-179.
