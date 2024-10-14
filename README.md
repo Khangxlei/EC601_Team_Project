@@ -1,4 +1,4 @@
-# Stock Market Prediction Using RNN
+# Stock Market Prediction Using LSTM
 
 ## Project Description
 
