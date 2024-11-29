@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import axios from "axios";
-import { Line } from "react-chartjs-2"; // Import Line chart
+import { Line } from "react-chartjs-2";
 
-// Required Chart.js registration
+// Chart.js and annotation plugin imports
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -13,6 +13,7 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
+import annotationPlugin from "chartjs-plugin-annotation";
 
 ChartJS.register(
   CategoryScale,
@@ -21,22 +22,21 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  annotationPlugin
 );
 
 function App() {
-  const [ticker, setTicker] = useState(""); // State for ticker symbol
-  const [period, setPeriod] = useState("1y"); // State for historical data period
-  const [balance, setBalance] = useState(10000); // State for initial balance
-  const [futureDays, setFutureDays] = useState(0); // State for future prediction days
-  const [results, setResults] = useState(null); // State for API results
-  const [error, setError] = useState(null); // State for error messages
+  const [ticker, setTicker] = useState("");
+  const [period, setPeriod] = useState("1y");
+  const [balance, setBalance] = useState(10000);
+  const [futureDays, setFutureDays] = useState(0);
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
 
-  // Form submit handler
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validate inputs
     if (!ticker.trim()) {
       setError("Ticker symbol is required");
       return;
@@ -56,7 +56,7 @@ function App() {
         ticker,
         period,
         initial_balance: parseFloat(balance),
-        future_days: parseInt(futureDays), // Include future_days in the request payload
+        future_days: parseInt(futureDays),
       });
       setResults(response.data);
     } catch (err) {
@@ -64,7 +64,6 @@ function App() {
     }
   };
 
-  // Prepare chart data
   const getChartData = () => {
     if (!results) return null;
 
@@ -74,25 +73,57 @@ function App() {
       pred.actual !== null ? pred.actual : null
     );
 
+    // Prepare chart data
     return {
       labels: dates,
       datasets: [
         {
           label: "Predicted Prices",
           data: predictedPrices,
-          borderColor: "rgba(75, 192, 192, 1)", // Line color for predictions
-          backgroundColor: "rgba(75, 192, 192, 0.2)", // Fill under line
+          borderColor: "rgba(75, 192, 192, 1)",
+          backgroundColor: "rgba(75, 192, 192, 0.2)",
           tension: 0.4,
         },
         {
           label: "Actual Prices",
           data: actualPrices,
-          borderColor: "rgba(255, 99, 132, 1)", // Line color for actual prices
-          backgroundColor: "rgba(255, 99, 132, 0.2)", // Fill under line
+          borderColor: "rgba(255, 99, 132, 1)",
+          backgroundColor: "rgba(255, 99, 132, 0.2)",
           tension: 0.4,
         },
       ],
     };
+  };
+
+  const getAnnotations = () => {
+    if (!results || !results.trade_log) return [];
+
+    return results.trade_log.map((trade) => ({
+      type: "point",
+      xValue: trade.date,
+      yValue: trade.price,
+      backgroundColor: trade.action === "Bought" ? "green" : "red",
+      radius: 5,
+      borderColor: "black",
+      borderWidth: 1,
+      label: {
+        content: trade.action,
+        enabled: true,
+        position: "top",
+      },
+    }));
+  };
+
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: "top",
+      },
+      annotation: {
+        annotations: getAnnotations(), // Pass annotations for trades
+      },
+    },
   };
 
   return (
@@ -129,7 +160,7 @@ function App() {
           <input
             type="number"
             value={futureDays}
-            onChange={(e) => setFutureDays(parseInt(e.target.value) || 0)} // Input for future_days
+            onChange={(e) => setFutureDays(parseInt(e.target.value) || 0)}
           />
         </div>
         <button type="submit">Predict</button>
@@ -143,8 +174,7 @@ function App() {
           <p>Profit/Loss: ${results.profit_loss || "N/A"}</p>
           <p>RMSE: {results.rmse}</p>
           <h3>Graph of Predictions</h3>
-          {/* Render the chart */}
-          <Line data={getChartData()} />
+          <Line data={getChartData()} options={chartOptions} />
         </div>
       )}
 
