@@ -1,5 +1,28 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { Line } from "react-chartjs-2"; // Import Line chart
+
+// Required Chart.js registration
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from "chart.js";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 function App() {
   const [ticker, setTicker] = useState(""); // State for ticker symbol
@@ -39,6 +62,37 @@ function App() {
     } catch (err) {
       setError(err.response?.data?.detail || "An error occurred");
     }
+  };
+
+  // Prepare chart data
+  const getChartData = () => {
+    if (!results) return null;
+
+    const dates = results.predictions.map((pred) => pred.date);
+    const predictedPrices = results.predictions.map((pred) => pred.predicted);
+    const actualPrices = results.predictions.map((pred) =>
+      pred.actual !== null ? pred.actual : null
+    );
+
+    return {
+      labels: dates,
+      datasets: [
+        {
+          label: "Predicted Prices",
+          data: predictedPrices,
+          borderColor: "rgba(75, 192, 192, 1)", // Line color for predictions
+          backgroundColor: "rgba(75, 192, 192, 0.2)", // Fill under line
+          tension: 0.4,
+        },
+        {
+          label: "Actual Prices",
+          data: actualPrices,
+          borderColor: "rgba(255, 99, 132, 1)", // Line color for actual prices
+          backgroundColor: "rgba(255, 99, 132, 0.2)", // Fill under line
+          tension: 0.4,
+        },
+      ],
+    };
   };
 
   return (
@@ -88,15 +142,9 @@ function App() {
           <p>Final Balance: ${results.final_balance}</p>
           <p>Profit/Loss: ${results.profit_loss || "N/A"}</p>
           <p>RMSE: {results.rmse}</p>
-          <h3>Predictions</h3>
-          <ul>
-            {results.predictions.map((pred, index) => (
-              <li key={index}>
-                {pred.date}: Predicted - {pred.predicted}
-                {pred.actual !== null ? `, Actual - ${pred.actual}` : ""}
-              </li>
-            ))}
-          </ul>
+          <h3>Graph of Predictions</h3>
+          {/* Render the chart */}
+          <Line data={getChartData()} />
         </div>
       )}
 
