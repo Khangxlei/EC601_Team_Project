@@ -23,12 +23,14 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Allow requests from React frontend
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# Define valid periods
+valid_periods = ["6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
 
 # Define models
 class Trade(BaseModel):
@@ -40,25 +42,27 @@ class Trade(BaseModel):
 
 class PredictionItem(BaseModel):
     date: str
-    actual: Optional[float] = None  # Allow this to be None for future predictions
+    actual: Optional[float] = None
     predicted: float
 
 class PredictionRequest(BaseModel):
     ticker: str
     period: str
     initial_balance: float
-    future_days: int = 0  # New field for future prediction days
+    future_days: int = 0
 
 class PredictionResponse(BaseModel):
     initial_balance: float
     final_balance: float
-    profit_loss: Optional[float] = None  # Allow this to be None
+    profit_loss: Optional[float] = None
     rmse: float
     trade_log: List[Trade]
     predictions: List[PredictionItem]
 
 # Utility functions
 def download_stock_data(ticker, period="5y"):
+    if period not in valid_periods:
+        raise HTTPException(status_code=400, detail=f"Invalid period. Must be one of: {', '.join(valid_periods)}")
     stock_data = yf.download(ticker, period=period)
     return stock_data
 
@@ -138,10 +142,13 @@ def simulate_trading(predictions, actual_prices, dates, initial_balance=10000, s
     profit_loss = balance - initial_balance
     return trade_log, profit_loss
 
-# FastAPI endpoint
 @app.post("/api/predict", response_model=PredictionResponse)
 async def predict_stock(request: PredictionRequest):
     try:
+        # Validate period
+        if request.period not in valid_periods:
+            raise HTTPException(status_code=400, detail=f"Invalid period. Must be one of: {', '.join(valid_periods)}")
+
         # Validate future_days
         if request.future_days < 0 or request.future_days > 365:
             raise HTTPException(status_code=400, detail="Future days must be between 0 and 365")
@@ -163,7 +170,7 @@ async def predict_stock(request: PredictionRequest):
         predictions, rmse = predict_and_evaluate(model, X_test, y_test, scaler)
 
         # Generate future predictions
-        last_sequence = X_test[-1]  # Last sequence from test data
+        last_sequence = X_test[-1]
         future_predictions = predict_future(model, last_sequence, request.future_days, scaler)
 
         # Generate future dates
@@ -179,10 +186,11 @@ async def predict_stock(request: PredictionRequest):
             for i in range(len(test_dates))
         ]
         all_predictions.extend(
-            [{"date": str(future_dates[i].date()), "actual": None, "predicted": float(future_predictions[i])} for i in range(request.future_days)]
+            [{"date": str(future_dates[i].date()), "actual": None, "predicted": float(future_predictions[i])}
+             for i in range(request.future_days)]
         )
 
-        # Calculate profit_loss only if trade_log is present
+        # Calculate profit_loss
         trade_log, profit_loss = simulate_trading(predictions, actual_prices, test_dates, request.initial_balance)
 
         return {
