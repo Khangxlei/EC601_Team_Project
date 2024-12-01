@@ -57,15 +57,19 @@ class PredictionRequest(BaseModel):
 
 class PredictionResponse(BaseModel):
     initial_balance: float
-    final_balance: float
-    profit_loss: Optional[float] = None
-    rmse: float
-    trade_log: List[Trade]
-    predictions: List[PredictionItem]
+    final_balance_basic: float
+    final_balance_enhanced: float
+    profit_loss_basic: Optional[float] = None
+    profit_loss_enhanced: Optional[float] = None
+    rmse_basic: float
+    rmse_enhanced: float
+    trade_log_basic: List[Trade]
+    trade_log_enhanced: List[Trade]
+    predictions_basic: List[PredictionItem]
+    predictions_enhanced: List[PredictionItem]
 
 # Utility functions
 def fetch_fred_data(series_id, start_date, end_date):
-    """Fetch economic data from FRED."""
     url = "https://api.stlouisfed.org/fred/series/observations"
     params = {
         "series_id": series_id,
@@ -84,12 +88,11 @@ def fetch_fred_data(series_id, start_date, end_date):
     return None
 
 def get_economic_indicators(start_date, end_date):
-    """Fetch multiple economic indicators."""
     indicators = {
-        "CPIAUCSL": "inflation",         # Consumer Price Index
-        "FEDFUNDS": "interest_rate",     # Federal Funds Rate
-        "UNRATE": "unemployment",        # Unemployment Rate
-        "A191RL1Q225SBEA": "gdp_growth" # Real GDP Growth
+        "CPIAUCSL": "inflation",
+        "FEDFUNDS": "interest_rate",
+        "UNRATE": "unemployment",
+        "A191RL1Q225SBEA": "gdp_growth"
     }
 
     economic_data = pd.DataFrame()
@@ -106,27 +109,41 @@ def download_stock_data(ticker, period="5y"):
     stock_data = yf.download(ticker, period=period)
     return stock_data
 
-def preprocess_data(stock_data, economic_data, feature_col="Close", seq_length=60):
+def preprocess_basic_data(stock_data, feature_col="Close", seq_length=60):
     try:
         seq_length = int(float(seq_length))
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail=f"Invalid sequence length: {seq_length}")
 
-    # Align timestamps
+    stock_scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_stock = stock_scaler.fit_transform(stock_data[[feature_col]])
+
+    X, y = [], []
+    for i in range(seq_length, len(scaled_stock)):
+        X.append(scaled_stock[i-seq_length:i])
+        y.append(scaled_stock[i, 0])
+
+    X, y = np.array(X), np.array(y)
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+    return X, y, stock_scaler
+
+def preprocess_enhanced_data(stock_data, economic_data, feature_col="Close", seq_length=60):
+    try:
+        seq_length = int(float(seq_length))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid sequence length: {seq_length}")
+
     stock_data.index = stock_data.index.tz_localize(None)
     economic_data.index = economic_data.index.tz_localize(None)
 
-    # Reindex economic data to match stock data dates
     economic_data = economic_data.reindex(stock_data.index).ffill().fillna(0)
 
-    # Scale the data
     stock_scaler = MinMaxScaler(feature_range=(0, 1))
     economic_scaler = MinMaxScaler(feature_range=(0, 1))
 
     scaled_stock = stock_scaler.fit_transform(stock_data[[feature_col]])
     scaled_economic = economic_scaler.fit_transform(economic_data)
 
-    # Combine features
     combined_data = np.hstack((scaled_stock, scaled_economic))
 
     X, y = [], []
@@ -153,62 +170,47 @@ def train_lstm_model(model, X_train, y_train, epochs=10, batch_size=32):
     model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, verbose=1)
     return model
 
-def predict_future(model, last_sequence, days, scaler):
-    future_predictions = []
-    current_sequence = last_sequence.copy()
-
-    for _ in range(days):
-        pred = model.predict(current_sequence.reshape(1, -1, current_sequence.shape[-1]))
-        future_predictions.append(scaler.inverse_transform(pred)[0][0])
-        # Update sequence with prediction and zero values for economic indicators
-        current_sequence = np.append(current_sequence[1:],
-                                   np.hstack((pred, np.zeros((1, current_sequence.shape[-1]-1)))),
-                                   axis=0)
-    return future_predictions
-
-def simulate_trading(predictions, actual_prices, dates, initial_balance=10000, shares=0):
+def simulate_trading(predictions, actual_prices, dates, initial_balance=10000):
     balance = initial_balance
-    total_shares = shares
+    shares = 0
     trade_log = []
 
     for i in range(1, len(predictions)):
-        predicted_price = predictions[i]
-        actual_price = actual_prices[i]
-        date = dates[i]
-
-        # Handle any NaN values
-        if np.isnan(predicted_price) or np.isnan(actual_price):
+        if np.isnan(predictions[i]) or np.isnan(actual_prices[i]):
             continue
 
-        if predicted_price > actual_prices[i-1] and balance >= actual_price:
-            shares_to_buy = balance // actual_price
-            balance -= shares_to_buy * actual_price
-            total_shares += shares_to_buy
+        predicted_change = predictions[i] - predictions[i-1]
+        current_price = actual_prices[i]
+
+        if predicted_change > 0 and balance >= current_price:
+            shares_to_buy = balance // current_price
+            balance -= shares_to_buy * current_price
+            shares += shares_to_buy
             trade_log.append(Trade(
-                date=str(date),
+                date=str(dates[i]),
                 action="Bought",
                 shares=int(shares_to_buy),
-                price=float(actual_price),
+                price=float(current_price),
                 balance=float(balance)
             ))
 
-        elif predicted_price < actual_prices[i-1] and total_shares > 0:
-            balance += total_shares * actual_price
+        elif predicted_change < 0 and shares > 0:
+            balance += shares * current_price
             trade_log.append(Trade(
-                date=str(date),
+                date=str(dates[i]),
                 action="Sold",
-                shares=int(total_shares),
-                price=float(actual_price),
+                shares=int(shares),
+                price=float(current_price),
                 balance=float(balance)
             ))
-            total_shares = 0
+            shares = 0
 
-    if total_shares > 0:
-        balance += total_shares * actual_prices[-1]
+    if shares > 0:
+        balance += shares * actual_prices[-1]
         trade_log.append(Trade(
             date=str(dates[-1]),
             action="Sold",
-            shares=int(total_shares),
+            shares=int(shares),
             price=float(actual_prices[-1]),
             balance=float(balance)
         ))
@@ -220,93 +222,116 @@ def simulate_trading(predictions, actual_prices, dates, initial_balance=10000, s
 async def predict_stock(request: PredictionRequest):
     try:
         if request.period not in valid_periods:
-            raise HTTPException(status_code=400, detail=f"Invalid period. Must be one of: {', '.join(valid_periods)}")
+            raise HTTPException(status_code=400,
+                              detail=f"Invalid period. Must be one of: {', '.join(valid_periods)}")
 
         if request.future_days < 0 or request.future_days > 365:
-            raise HTTPException(status_code=400, detail="Future days must be between 0 and 365")
+            raise HTTPException(status_code=400,
+                              detail="Future days must be between 0 and 365")
 
-        # Download stock data
+        # Download data
         stock_data = download_stock_data(request.ticker, request.period)
         start_date = stock_data.index[0].strftime('%Y-%m-%d')
         end_date = stock_data.index[-1].strftime('%Y-%m-%d')
-
-        # Get economic indicators
         economic_data = get_economic_indicators(start_date, end_date)
 
-        # Preprocess the data
-        X, y, scaler = preprocess_data(stock_data, economic_data)
+        # Prepare both datasets
+        X_basic, y_basic, scaler_basic = preprocess_basic_data(stock_data)
+        X_enhanced, y_enhanced, scaler_enhanced = preprocess_enhanced_data(stock_data, economic_data)
 
         # Split data
-        split_idx = int(len(X) * 0.8)
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        split_idx = int(len(X_basic) * 0.8)
 
-        # Train model
-        model = create_lstm_model((X_train.shape[1], X_train.shape[2]))
-        model = train_lstm_model(model, X_train, y_train)
+        # Basic model data
+        X_train_basic = X_basic[:split_idx]
+        X_test_basic = X_basic[split_idx:]
+        y_train_basic = y_basic[:split_idx]
+        y_test_basic = y_basic[split_idx:]
+
+        # Enhanced model data
+        X_train_enhanced = X_enhanced[:split_idx]
+        X_test_enhanced = X_enhanced[split_idx:]
+        y_train_enhanced = y_enhanced[:split_idx]
+        y_test_enhanced = y_enhanced[split_idx:]
+
+        # Train both models
+        model_basic = create_lstm_model((X_train_basic.shape[1], 1))
+        model_basic = train_lstm_model(model_basic, X_train_basic, y_train_basic)
+
+        model_enhanced = create_lstm_model((X_train_enhanced.shape[1], X_train_enhanced.shape[2]))
+        model_enhanced = train_lstm_model(model_enhanced, X_train_enhanced, y_train_enhanced)
 
         # Make predictions
-        predictions = model.predict(X_test)
-        predictions = scaler.inverse_transform(predictions)
-        actual_prices = scaler.inverse_transform(y_test.reshape(-1, 1))
+        predictions_basic = model_basic.predict(X_test_basic)
+        predictions_basic = scaler_basic.inverse_transform(predictions_basic)
+        actual_prices_basic = scaler_basic.inverse_transform(y_test_basic.reshape(-1, 1))
+
+        predictions_enhanced = model_enhanced.predict(X_test_enhanced)
+        predictions_enhanced = scaler_enhanced.inverse_transform(predictions_enhanced)
+        actual_prices_enhanced = scaler_enhanced.inverse_transform(y_test_enhanced.reshape(-1, 1))
 
         # Handle NaN values
-        predictions = np.nan_to_num(predictions, nan=0.0)
-        actual_prices = np.nan_to_num(actual_prices, nan=0.0)
+        predictions_basic = np.nan_to_num(predictions_basic, nan=0.0)
+        predictions_enhanced = np.nan_to_num(predictions_enhanced, nan=0.0)
+        actual_prices_basic = np.nan_to_num(actual_prices_basic, nan=0.0)
+        actual_prices_enhanced = np.nan_to_num(actual_prices_enhanced, nan=0.0)
 
         # Calculate RMSE
-        rmse = float(np.sqrt(np.mean((predictions - actual_prices) ** 2)))
+        rmse_basic = float(np.sqrt(np.mean((predictions_basic - actual_prices_basic) ** 2)))
+        rmse_enhanced = float(np.sqrt(np.mean((predictions_enhanced - actual_prices_enhanced) ** 2)))
 
-        # Generate predictions list
+        # Generate prediction lists
         test_dates = stock_data.index[split_idx + 60:].strftime("%Y-%m-%d").tolist()
 
-        all_predictions = []
+        predictions_list_basic = []
+        predictions_list_enhanced = []
+
         for i in range(len(test_dates)):
-            pred_value = float(predictions[i][0])
-            actual_value = float(actual_prices[i][0])
+            pred_basic = float(predictions_basic[i][0])
+            pred_enhanced = float(predictions_enhanced[i][0])
+            actual = float(actual_prices_basic[i][0])
 
-            # Ensure values are within JSON-compatible range
-            if np.isfinite(pred_value) and np.isfinite(actual_value):
-                all_predictions.append(
-                    PredictionItem(
-                        date=test_dates[i],
-                        actual=actual_value,
-                        predicted=pred_value
-                    )
-                )
+            if np.isfinite(pred_basic) and np.isfinite(actual):
+                predictions_list_basic.append(PredictionItem(
+                    date=test_dates[i],
+                    actual=actual,
+                    predicted=pred_basic
+                ))
 
-        # Generate future predictions if requested
-        if request.future_days > 0:
-            last_sequence = X_test[-1]
-            future_predictions = predict_future(model, last_sequence, request.future_days, scaler)
-            future_dates = pd.date_range(stock_data.index[-1], periods=request.future_days + 1, freq="B")[1:]
-
-            for i in range(len(future_predictions)):
-                pred_value = float(future_predictions[i])
-                if np.isfinite(pred_value):
-                    all_predictions.append(
-                        PredictionItem(
-                            date=str(future_dates[i].date()),
-                            actual=None,
-                            predicted=pred_value
-                        )
-                    )
+            if np.isfinite(pred_enhanced) and np.isfinite(actual):
+                predictions_list_enhanced.append(PredictionItem(
+                    date=test_dates[i],
+                    actual=actual,
+                    predicted=pred_enhanced
+                ))
 
         # Simulate trading
-        trade_log, profit_loss = simulate_trading(
-            predictions.flatten(),
-            actual_prices.flatten(),
+        trade_log_basic, profit_loss_basic = simulate_trading(
+            predictions_basic.flatten(),
+            actual_prices_basic.flatten(),
+            test_dates,
+            request.initial_balance
+        )
+
+        trade_log_enhanced, profit_loss_enhanced = simulate_trading(
+            predictions_enhanced.flatten(),
+            actual_prices_enhanced.flatten(),
             test_dates,
             request.initial_balance
         )
 
         return PredictionResponse(
             initial_balance=request.initial_balance,
-            final_balance=trade_log[-1].balance if trade_log else request.initial_balance,
-            profit_loss=profit_loss,
-            rmse=rmse,
-            trade_log=trade_log,
-            predictions=all_predictions,
+            final_balance_basic=trade_log_basic[-1].balance if trade_log_basic else request.initial_balance,
+            final_balance_enhanced=trade_log_enhanced[-1].balance if trade_log_enhanced else request.initial_balance,
+            profit_loss_basic=profit_loss_basic,
+            profit_loss_enhanced=profit_loss_enhanced,
+            rmse_basic=rmse_basic,
+            rmse_enhanced=rmse_enhanced,
+            trade_log_basic=trade_log_basic,
+            trade_log_enhanced=trade_log_enhanced,
+            predictions_basic=predictions_list_basic,
+            predictions_enhanced=predictions_list_enhanced
         )
 
     except Exception as e:
